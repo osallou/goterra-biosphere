@@ -1,0 +1,14 @@
+endpoints:
+  - id: "EndpointID"
+    name: "XXXX"
+    user: "OpenstackUserAdminOnDomain" 
+    password:  "XXXX"
+    domain: "OpenstackDomainID"
+    project: "OpenstackProjectInDomainForAdminUser (to get a token)"
+    keystone: "Base_URL_for_keystone_API"
+    nova: "Base_URL_for_nova_API"
+    project_id_default: "DefaultProjectIDIfUniqueProject"
+    project_name_default: "DefaultProjectNameIfUniqueProject"
+    keypair_default: "DefaultKeypairName (must exists), "
+    per_ns_project: true
+    user_role: "IDOfUserRole"
