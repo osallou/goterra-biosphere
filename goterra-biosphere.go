@@ -136,13 +136,13 @@ func GetGotEventAction() error {
 	}
 
 	err = ch.ExchangeDeclare(
-		"gotuser", // name
-		"fanout",  // type
-		true,      // durable
-		false,     // auto-deleted
-		false,     // internal
-		false,     // no-wait
-		nil,       // arguments
+		"gotevent", // name
+		"fanout",   // type
+		true,       // durable
+		false,      // auto-deleted
+		false,      // internal
+		false,      // no-wait
+		nil,        // arguments
 	)
 	if err != nil {
 		log.Error().Msg("failed to connect to open exchange")
@@ -150,7 +150,7 @@ func GetGotEventAction() error {
 	}
 
 	queue, queueErr := ch.QueueDeclare(
-		"gotuserlogged",
+		"gotevents",
 		true,  // durable
 		false, // auto-deleted
 		false, // exclusive
@@ -162,7 +162,7 @@ func GetGotEventAction() error {
 		return queueErr
 	}
 
-	bindErr := ch.QueueBind(queue.Name, "", "gotuser", false, nil)
+	bindErr := ch.QueueBind(queue.Name, "", "gotevent", false, nil)
 	if bindErr != nil {
 		log.Error().Msg("failed to bind queue to exchange")
 		return bindErr

@@ -56,6 +56,7 @@ type Endpoint struct {
 	PerNSProject       bool   `yaml:"per_ns_project"`
 	KeypairDefault     string `yaml:"keypair_default"`
 	UserRole           string `yaml:"user_role"`
+	AdminRole          string `yaml:"admin_role"`
 }
 
 // BiosphereConfig is the yaml config for biosphere
@@ -171,9 +172,11 @@ func createUserEndpointDefaults(uid string, endpoint Endpoint, userID string, pr
 	}
 	defaults := make(map[string][]string)
 	defaults["user_id"] = []string{userID}
-	defaults["project_id"] = []string{projectID}
-	defaults["project_name"] = []string{projectName}
-	defaults["keypair"] = []string{endpoint.KeypairDefault}
+	defaults["tenant_id"] = []string{projectID}
+	defaults["tenant_name"] = []string{projectName}
+	if endpoint.KeypairDefault != "" {
+		defaults["key_pair"] = []string{endpoint.KeypairDefault}
+	}
 	newUserDefaults := terraModel.EndpointDefaults{
 		UID:       uid,
 		Endpoint:  endpoint.ID,
@@ -276,12 +279,20 @@ func createUserEndpointDefaultsOnEndpoints(uid string, ns string, endpoints []En
 			continue
 		}
 		userID, uok := Users[uid][endpoint.ID]
-		projectID, pok := Namespaces[ns][endpoint.ID]
-		if !uok || !pok {
+
+		if !uok {
 			continue
 		}
+
 		projectName := endpoint.DefaultProjectName
+		projectID := endpoint.DefaultProjectID
+
 		if endpoint.PerNSProject {
+			var pok bool
+			projectID, pok = Namespaces[ns][endpoint.ID]
+			if !pok {
+				continue
+			}
 			projectName = ns
 		}
 		createUserEndpointDefaults(uid, endpoint, userID, projectID, projectName, ns)
@@ -301,7 +312,7 @@ func addUserToProjectOnEndpoints(token string, ns string, uid string, endpoints 
 		if !uok || !pok {
 			continue
 		}
-		err := addUserToProject(token, endpoint, projectID, userID)
+		err := addUserToProject(token, endpoint, projectID, userID, endpoint.UserRole)
 		if err != nil {
 			log.Error().Str("endpoint", endpoint.ID).Str("ns", ns).Str("user", uid).Msg("Failed to add user to project on endpoint")
 		}
@@ -309,8 +320,28 @@ func addUserToProjectOnEndpoints(token string, ns string, uid string, endpoints 
 	}
 }
 
-func addUserToProject(token string, endpoint Endpoint, projectID string, userID string) error {
-	request, err := http.NewRequest("PUT", fmt.Sprintf("%s/v3/projects/%s/users/%s/roles/%s", endpoint.KeystoneURL, projectID, userID, endpoint.UserRole), nil)
+func addUserToProject(token string, endpoint Endpoint, projectID string, userID string, role string) error {
+	request, err := http.NewRequest("PUT", fmt.Sprintf("%s/v3/projects/%s/users/%s/roles/%s", endpoint.KeystoneURL, projectID, userID, role), nil)
+	request.Header.Set("Content-type", "application/json")
+	request.Header.Set("X-Auth-Token", token)
+	if err != nil {
+		return fmt.Errorf("%s", err)
+	}
+	client := http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("%s", err)
+	}
+	defer resp.Body.Close()
+	log.Info().Msgf("Add user to project: %d", resp.StatusCode)
+	if resp.StatusCode != 204 {
+		return fmt.Errorf("Error: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func removeUserFromProject(token string, endpoint Endpoint, projectID string, userID string, role string) error {
+	request, err := http.NewRequest("DELETE", fmt.Sprintf("%s/v3/projects/%s/users/%s/roles/%s", endpoint.KeystoneURL, projectID, userID, role), nil)
 	request.Header.Set("Content-type", "application/json")
 	request.Header.Set("X-Auth-Token", token)
 	if err != nil {
@@ -400,27 +431,47 @@ func createProject(token string, endpoint Endpoint, uid string, ns string) (stri
 	}
 	Namespaces[ns][endpoint.ID] = biosphereNS.OID
 
+	userOID := Users[uid][endpoint.ID]
+
 	if endpoint.PerNSProject {
-		err := createKeyPair(token, endpoint, biosphereNS.OID)
-		if err != nil {
+		// add main user to project
+		addUserToProject(token, endpoint, biosphereNS.OID, endpoint.User, endpoint.AdminRole)
+		// get token for this project
+		projToken, projErr := GetToken(endpoint, biosphereNS.OID)
+		if projErr != nil {
 			log.Error().Str("uid", uid).Str("ns", ns).Str("endpoint", endpoint.ID).Msgf("%s", err)
+		} else {
+			err := createKeyPair(projToken, endpoint, biosphereNS.OID, userOID)
+			if err != nil {
+				log.Error().Str("uid", uid).Str("ns", ns).Str("endpoint", endpoint.ID).Msgf("%s", err)
+			}
 		}
+		// remove main user from project
+		removeUserFromProject(token, endpoint, biosphereNS.OID, endpoint.User, endpoint.AdminRole)
 	}
 
 	return biosphereNS.OID, ns, nil
 }
 
-func createKeyPair(token string, endpoint Endpoint, projectID string) error {
+func createKeyPair(token string, endpoint Endpoint, projectID string, userID string) error {
+	if endpoint.KeypairDefault == "" {
+		log.Debug().Msg("no default keypair, skip creation")
+		return nil
+	}
 	client := http.Client{}
 	keypairData := make(map[string]interface{})
 	keypairData["name"] = endpoint.KeypairDefault
 	keypairData["type"] = "ssh"
+	keypairData["user_id"] = userID
+
 	keypair := make(map[string]interface{})
 	keypair["keypair"] = keypairData
 	jsonData, _ := json.Marshal(keypair)
+
 	//log.Error().Msgf("Send %s", string(jsonData))
 	request, err := http.NewRequest("POST", fmt.Sprintf("%s/v2.1/%s/os-keypairs", endpoint.NovaURL, projectID), bytes.NewBuffer(jsonData))
 	request.Header.Set("Content-type", "application/json")
+
 	request.Header.Set("X-Auth-Token", token)
 	if err != nil {
 		return fmt.Errorf("keypair creation error: %s", err)
@@ -430,9 +481,10 @@ func createKeyPair(token string, endpoint Endpoint, projectID string) error {
 		return fmt.Errorf("keypair creation error: %s", err)
 	}
 	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
 
 	if resp.StatusCode != 201 {
-		return fmt.Errorf("User creation error %d", resp.StatusCode)
+		return fmt.Errorf("Keypair creation error %d: %s", resp.StatusCode, body)
 	}
 	return nil
 }

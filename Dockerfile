@@ -14,13 +14,14 @@ RUN go get -u github.com/golang/dep/cmd/dep
 RUN dep ensure
 
 # Install the package
-RUN go build -ldflags "-X  main.Version=`git rev-parse --short HEAD`" goterra-biosphere.go
+RUN go build -ldflags "-X  main.Version=`git rev-parse --short HEAD`" goterra-biosphere.go goterra-openstack.go
 RUN cp goterra-biosphere.yml.example goterra.yml
+RUN cp biosphere.yml.example biosphere.yml
 
 FROM alpine:latest  
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 RUN mkdir /lib64 && ln -s /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2
 COPY --from=0 /go/src/github.com/osallou/goterra-biosphere/goterra-biosphere .
-COPY --from=0 /go/src/github.com/osallou/goterra-biosphere/goterra.yml .
+COPY --from=0 /go/src/github.com/osallou/goterra-biosphere/biosphere.yml .
 CMD ["./goterra-biosphere"]
