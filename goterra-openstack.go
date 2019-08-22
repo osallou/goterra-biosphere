@@ -353,7 +353,7 @@ func removeUserFromProject(token string, endpoint Endpoint, projectID string, us
 		return fmt.Errorf("%s", err)
 	}
 	defer resp.Body.Close()
-	log.Info().Msgf("Add user to project: %d", resp.StatusCode)
+	log.Info().Msgf("Remove user to project: %d", resp.StatusCode)
 	if resp.StatusCode != 204 {
 		return fmt.Errorf("Error: %d", resp.StatusCode)
 	}
@@ -437,15 +437,20 @@ func createProject(token string, endpoint Endpoint, uid string, ns string) (stri
 		// add main user to project
 		addUserToProject(token, endpoint, biosphereNS.OID, endpoint.User, endpoint.AdminRole)
 		// get token for this project
-		projToken, projErr := GetToken(endpoint, biosphereNS.OID)
-		if projErr != nil {
+		err := createKeyPair(token, endpoint, endpoint.ProjectID, userOID)
+		if err != nil {
 			log.Error().Str("uid", uid).Str("ns", ns).Str("endpoint", endpoint.ID).Msgf("%s", err)
-		} else {
-			err := createKeyPair(projToken, endpoint, biosphereNS.OID, userOID)
-			if err != nil {
-				log.Error().Str("uid", uid).Str("ns", ns).Str("endpoint", endpoint.ID).Msgf("%s", err)
-			}
 		}
+		/*
+			projToken, projErr := GetToken(endpoint, biosphereNS.OID)
+			if projErr != nil {
+				log.Error().Str("uid", uid).Str("ns", ns).Str("endpoint", endpoint.ID).Msgf("%s", projErr)
+			} else {
+				err := createKeyPair(projToken, endpoint, biosphereNS.OID, userOID)
+				if err != nil {
+					log.Error().Str("uid", uid).Str("ns", ns).Str("endpoint", endpoint.ID).Msgf("%s", err)
+				}
+			}*/
 		// remove main user from project
 		removeUserFromProject(token, endpoint, biosphereNS.OID, endpoint.User, endpoint.AdminRole)
 	}
@@ -471,7 +476,7 @@ func createKeyPair(token string, endpoint Endpoint, projectID string, userID str
 	//log.Error().Msgf("Send %s", string(jsonData))
 	request, err := http.NewRequest("POST", fmt.Sprintf("%s/v2.1/%s/os-keypairs", endpoint.NovaURL, projectID), bytes.NewBuffer(jsonData))
 	request.Header.Set("Content-type", "application/json")
-
+	request.Header.Set("X-OpenStack-Nova-API-Version", "2.10")
 	request.Header.Set("X-Auth-Token", token)
 	if err != nil {
 		return fmt.Errorf("keypair creation error: %s", err)
@@ -486,6 +491,14 @@ func createKeyPair(token string, endpoint Endpoint, projectID string, userID str
 	if resp.StatusCode != 201 {
 		return fmt.Errorf("Keypair creation error %d: %s", resp.StatusCode, body)
 	}
+
+	var newKeypair map[string]interface{}
+	json.Unmarshal(body, &newKeypair)
+	keypairInfo := newKeypair["keypair"].(map[string]interface{})
+	privateKey := keypairInfo["private_key"].(string)
+	d1 := []byte(privateKey)
+	ioutil.WriteFile(fmt.Sprintf("/tmp/%s_%s.key", userID, projectID), d1, 0644)
+
 	return nil
 }
 
@@ -625,7 +638,7 @@ func GetToken(endpoint Endpoint, projectID string) (string, error) {
 		Auth: auth,
 	}
 	jsonData, _ := json.Marshal(data)
-	log.Error().Msgf("Send %s", string(jsonData))
+	// log.Error().Msgf("Send %s", string(jsonData))
 	request, err := http.NewRequest("POST", fmt.Sprintf("%s/v3/auth/tokens", endpoint.KeystoneURL), bytes.NewBuffer(jsonData))
 	request.Header.Set("Content-type", "application/json")
 	if err != nil {
