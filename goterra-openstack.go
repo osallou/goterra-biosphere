@@ -1,20 +1,5 @@
 package main
 
-/*
-
-TODO
-* on create_user, create user on endpoints and endpoint secrets
-
-* on create_ns
- * create project if not exists for selected endpoint (project = ns) and per_ns_project = true
- * add user role to project
- * add endpoint defaults
-* on update_ns
- * add user role to project (if needed to create project)
-
-* for genouest, query all users at regular interval, get their pubkey and create/update them locally
-*/
-
 import (
 	"bytes"
 	"context"
@@ -59,9 +44,42 @@ type Endpoint struct {
 	AdminRole          string `yaml:"admin_role"`
 }
 
+/*
+users:
+  home: "/home/biosphere/%s"  # home location
+  ldap:
+    host: "localhost"
+    port: 389
+    admin_cn: ""
+    admin_password: ""
+    dn: "goterra.org"
+    ou: "biosphere" # organizational unit for users
+*/
+
+// LdapConfig defines ldap connection parameters
+type LdapConfig struct {
+	Host          string
+	Port          uint64
+	AdminCN       string `yaml:"admin_cn"`
+	AdminPassword string `yaml:"admin_password"`
+	DN            string `yaml:"dn"`
+	OU            string `yaml:"ou"`
+	GID           int    `yaml:"gid"`
+	MinUID        int64  `yaml:"minuid"`
+	TLS           bool   `yaml:"tls"`
+}
+
+// UserConfig defines user creation
+type UserConfig struct {
+	Home string
+	Ldap LdapConfig
+}
+
 // BiosphereConfig is the yaml config for biosphere
 type BiosphereConfig struct {
 	Endpoints []Endpoint
+	Users     UserConfig
+	Loaded    bool
 }
 
 var biosphereConfig BiosphereConfig
@@ -126,6 +144,9 @@ func projectExists(token string, ns string, endpoint Endpoint) (*BiosphereNS, er
 
 //LoadConfig loads biosphere.yml or file from GOT_BIOSPHERE_CONFIG env var
 func LoadConfig() BiosphereConfig {
+	if biosphereConfig.Loaded {
+		return biosphereConfig
+	}
 	cfgFile := "biosphere.yml"
 	if os.Getenv("GOT_BIOSPHERE_CONFIG") != "" {
 		cfgFile = os.Getenv("GOT_BIOSPHERE_CONFIG")

@@ -2,11 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
+	"os/signal"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/handlers"
@@ -24,6 +29,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	ldap "gopkg.in/ldap.v3"
 )
 
 // Version of server
@@ -115,6 +122,141 @@ var HomeHandler = func(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func countBiosphereUsers(uid string) int64 {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	filter := bson.M{}
+	cursor, nbErr := biosphereUserCollection.Find(ctx, filter)
+	if nbErr != nil {
+		log.Error().Msgf("Failed to count number of users")
+		return 0
+	}
+	var counter int64
+	for cursor.Next(ctx) {
+		var bUser BiosphereUser
+		cursor.Decode(&bUser)
+		if bUser.UID == uid {
+			break
+		} else {
+			counter++
+		}
+	}
+	return counter
+}
+
+// OnUserUpdate creates user in ldap if necessary and adds ssh key
+func OnUserUpdate(action terraModel.UserAction) {
+	var user terraUser.User
+	err := json.Unmarshal([]byte(action.Data), &user)
+	if err != nil {
+		log.Error().Msgf("Failed to decode user: %s", action.Data)
+		return
+	}
+	if user.SSHPubKey == "" {
+		log.Debug().Msg("User has no ssh key declared")
+		return
+	}
+	config := LoadConfig()
+	if config.Users.Ldap.Host == "" {
+		log.Warn().Msg("No LDAP settings, skipping")
+		return
+	}
+
+	userHome := fmt.Sprintf(config.Users.Home, user.UID)
+
+	l, err := ldap.Dial("tcp", fmt.Sprintf("%s:%d", config.Users.Ldap.Host, config.Users.Ldap.Port))
+	if err != nil {
+		log.Error().Msgf("ldap conn error: %s", err)
+		return
+	}
+	defer l.Close()
+
+	if config.Users.Ldap.TLS {
+		// Reconnect with TLS
+		err = l.StartTLS(&tls.Config{InsecureSkipVerify: true})
+		if err != nil {
+			log.Error().Msgf("ldap tls error: %s", err)
+			return
+		}
+	}
+
+	// First bind with a read only user
+	err = l.Bind(config.Users.Ldap.AdminCN, config.Users.Ldap.AdminPassword)
+	if err != nil {
+		log.Error().Msgf("ldap bind error: %s", err)
+		return
+	}
+
+	// Search for the given username
+	searchRequest := ldap.NewSearchRequest(
+		fmt.Sprintf("ou=%s,%s", config.Users.Ldap.OU, config.Users.Ldap.DN),
+		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		fmt.Sprintf("(&(uid=%s))", user.UID),
+		[]string{"dn", "uidNumber"},
+		nil,
+	)
+
+	var UID int64
+	sr, err := l.Search(searchRequest)
+	if err != nil || len(sr.Entries) == 0 {
+		log.Info().Msgf("ldap user not found, creating it: %s", err)
+		req := ldap.NewAddRequest(fmt.Sprintf("uid=%s,ou=%s,%s", user.UID, config.Users.Ldap.OU, config.Users.Ldap.DN), nil)
+		req.Attribute("homeDirectory", []string{userHome})
+		req.Attribute("cn", []string{user.Email})
+		req.Attribute("sn", []string{user.UID})
+		req.Attribute("gidNumber", []string{fmt.Sprintf("%d", config.Users.Ldap.GID)})
+		UID = config.Users.Ldap.MinUID + countBiosphereUsers(user.UID)
+		req.Attribute("uidNumber", []string{fmt.Sprintf("%d", UID)})
+		req.Attribute("loginShell", []string{"/bin/bash"})
+		req.Attribute("objectClass", []string{"PosixAccount", "inetOrgPerson"})
+		err = l.Add(req)
+		if err != nil {
+			log.Error().Msgf("Failed to add user in ldap: %s", err)
+			return
+		}
+	} else {
+		log.Debug().Msgf("Got user in ldap: %+v", sr.Entries[0].Attributes)
+		for _, attr := range sr.Entries[0].Attributes {
+			if attr.Name == "uidNumber" {
+				var UIDErr error
+				UID, UIDErr = strconv.ParseInt(attr.Values[0], 10, 64)
+				if UIDErr != nil {
+					log.Error().Msgf("invalid uidnumber: %+v", attr.Values)
+					return
+				}
+				break
+			}
+		}
+	}
+
+	userSSHPath := fmt.Sprintf("%s/.ssh", userHome)
+	_, homeErr := os.Stat(userSSHPath)
+	if os.IsNotExist(homeErr) {
+		os.MkdirAll(userHome, 0755)
+		os.Mkdir(userSSHPath, 0700)
+	}
+
+	userAuthorizedKeys := fmt.Sprintf("%s/authorized_keys", userSSHPath)
+	ioutil.WriteFile(userAuthorizedKeys, []byte(user.SSHPubKey), 0644)
+	var chErr error
+	if os.IsNotExist(homeErr) {
+		chErr = os.Chown(userHome, int(UID), config.Users.Ldap.GID)
+		if chErr != nil {
+			log.Error().Msgf("Failed to chown %s", userHome)
+		}
+		chErr = os.Chown(userSSHPath, int(UID), config.Users.Ldap.GID)
+		if chErr != nil {
+			log.Error().Msgf("Failed to chown %s", userSSHPath)
+		}
+	}
+	chErr = os.Chown(userAuthorizedKeys, int(UID), config.Users.Ldap.GID)
+	if chErr != nil {
+		log.Error().Msgf("Failed to chown %s", userAuthorizedKeys)
+	}
+
+}
+
 // GetGotEventAction gets a message from rabbitmq exchange
 func GetGotEventAction() error {
 	config := terraConfig.LoadConfig()
@@ -182,6 +324,16 @@ func GetGotEventAction() error {
 		return consumeErr
 	}
 
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM)
+	go func(connection *amqp.Connection, channel *amqp.Channel) {
+		sig := <-sigs
+		channel.Close()
+		connection.Close()
+		log.Warn().Msgf("Closing AMQP channel and connection after signal %s", sig.String())
+		log.Warn().Msg("Ready for shutdown")
+	}(conn, ch)
+
 	forever := make(chan bool)
 
 	go func() {
@@ -199,6 +351,8 @@ func GetGotEventAction() error {
 			switch action.Action {
 			case "user_create":
 				OnUserCreate(action)
+			case "user_update":
+				OnUserUpdate(action)
 			case "ns_create":
 				OnNSCreate(action)
 			case "ns_update":

@@ -98,6 +98,18 @@
   version = "v0.8.3"
 
 [[projects]]
+  digest = "1:3c6faaeb500b7e6fadbe52c0b3fd62b6eed7801ed0d74bb3bd9577017df8d2f4"
+  name = "github.com/influxdata/influxdb"
+  packages = [
+    "client/v2",
+    "models",
+    "pkg/escape",
+  ]
+  pruneopts = "UT"
+  revision = "f8fdf652f348fc9980997fe1c972e2b79ddd13b0"
+  version = "v1.7.7"
+
+[[projects]]
   digest = "1:5d231480e1c64a726869bc4142d270184c419749d34f167646baa21008eb0a79"
   name = "github.com/mitchellh/go-homedir"
   packages = ["."]
@@ -250,6 +262,22 @@
   version = "v0.3.2"
 
 [[projects]]
+  digest = "1:af07c44dc04418be522bfd4e21ca9130d58169ea084e3a883e23772003a381c4"
+  name = "gopkg.in/asn1-ber.v1"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "f715ec2f112d1e4195b827ad68cf44017a3ef2b1"
+  version = "v1.3"
+
+[[projects]]
+  digest = "1:e9a0fa7c2dfc90e0fae16be5825ad98074d8704f5fcebfdc289a8e8fb0f8e4b5"
+  name = "gopkg.in/ldap.v3"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "9f0d712775a0973b7824a1585a86a4ea1d5263d9"
+  version = "v3.0.3"
+
+[[projects]]
   digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
   name = "gopkg.in/yaml.v2"
   packages = ["."]
@@ -263,6 +291,8 @@
   input-imports = [
     "github.com/gorilla/handlers",
     "github.com/gorilla/mux",
+    "github.com/influxdata/influxdb/client/v2",
+    "github.com/influxdata/influxdb/models",
     "github.com/osallou/goterra-auth/lib/utils",
     "github.com/osallou/goterra-lib/lib/config",
     "github.com/osallou/goterra-lib/lib/model",
@@ -276,6 +306,7 @@
     "go.mongodb.org/mongo-driver/bson/primitive",
     "go.mongodb.org/mongo-driver/mongo",
     "go.mongodb.org/mongo-driver/mongo/options",
+    "gopkg.in/ldap.v3",
     "gopkg.in/yaml.v2",
   ]
   solver-name = "gps-cdcl"
