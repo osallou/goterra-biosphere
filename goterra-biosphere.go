@@ -1,15 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,8 +28,6 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-
-	ldap "gopkg.in/ldap.v3"
 )
 
 // Version of server
@@ -65,6 +62,137 @@ type BiosphereNS struct {
 	ID       string `json:"id"`
 	OID      string `json:"oid"` // openstack project id
 	Endpoint string `json:"endpoint"`
+}
+
+// UserCreateHandler triggers onUserCreate
+var UserCreateHandler = func(w http.ResponseWriter, r *http.Request) {
+	user, err := CheckToken(r.Header.Get("Authorization"))
+	if err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		w.Header().Add("Content-Type", "application/json")
+		respError := map[string]interface{}{"message": "invalid token"}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+	if !user.Admin {
+		w.WriteHeader(http.StatusForbidden)
+		w.Header().Add("Content-Type", "application/json")
+		respError := map[string]interface{}{"message": "sorry, admin only...."}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+	vars := mux.Vars(r)
+	userID := vars["id"]
+	b, err := ioutil.ReadAll(r.Body)
+	defer r.Body.Close()
+	action := terraModel.UserAction{
+		Action: "user_create",
+		UID:    userID,
+		Data:   string(b),
+	}
+	OnUserCreate(action)
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	resp := map[string]interface{}{"message": "done"}
+	json.NewEncoder(w).Encode(resp)
+}
+
+// UserUpdateHandler triggers onUserUpdate
+var UserUpdateHandler = func(w http.ResponseWriter, r *http.Request) {
+	user, err := CheckToken(r.Header.Get("Authorization"))
+	if err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		w.Header().Add("Content-Type", "application/json")
+		respError := map[string]interface{}{"message": "invalid token"}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+	if !user.Admin {
+		w.WriteHeader(http.StatusForbidden)
+		w.Header().Add("Content-Type", "application/json")
+		respError := map[string]interface{}{"message": "sorry, admin only...."}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+	vars := mux.Vars(r)
+	userID := vars["id"]
+	b, err := ioutil.ReadAll(r.Body)
+	defer r.Body.Close()
+	action := terraModel.UserAction{
+		Action: "user_update",
+		UID:    userID,
+		Data:   string(b),
+	}
+	OnUserUpdate(action)
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	resp := map[string]interface{}{"message": "done"}
+	json.NewEncoder(w).Encode(resp)
+}
+
+// NSCreateHandler triggers onNSCreate
+var NSCreateHandler = func(w http.ResponseWriter, r *http.Request) {
+	user, err := CheckToken(r.Header.Get("Authorization"))
+	if err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		w.Header().Add("Content-Type", "application/json")
+		respError := map[string]interface{}{"message": "invalid token"}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+	if !user.Admin {
+		w.WriteHeader(http.StatusForbidden)
+		w.Header().Add("Content-Type", "application/json")
+		respError := map[string]interface{}{"message": "sorry, admin only...."}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+	vars := mux.Vars(r)
+	userID := vars["id"]
+	nsID := vars["nsid"]
+	action := terraModel.UserAction{
+		Action: "ns_update",
+		UID:    userID,
+		Data:   nsID,
+	}
+	OnNSCreate(action)
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	resp := map[string]interface{}{"message": "done"}
+	json.NewEncoder(w).Encode(resp)
+}
+
+// NSUpdateHandler triggers onNSUpdate
+var NSUpdateHandler = func(w http.ResponseWriter, r *http.Request) {
+	user, err := CheckToken(r.Header.Get("Authorization"))
+	if err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		w.Header().Add("Content-Type", "application/json")
+		respError := map[string]interface{}{"message": "invalid token"}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+	if !user.Admin {
+		w.WriteHeader(http.StatusForbidden)
+		w.Header().Add("Content-Type", "application/json")
+		respError := map[string]interface{}{"message": "sorry, admin only...."}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+
+	vars := mux.Vars(r)
+	userID := vars["id"]
+	nsID := vars["nsid"]
+	action := terraModel.UserAction{
+		Action: "ns_update",
+		UID:    userID,
+		Data:   nsID,
+	}
+	OnNSUpdate(action)
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	resp := map[string]interface{}{"message": "done"}
+	json.NewEncoder(w).Encode(resp)
 }
 
 // UserDefaultsHandler returns user defaults for an endpoint/namespace
@@ -145,116 +273,32 @@ func countBiosphereUsers(uid string) int64 {
 	return counter
 }
 
-// OnUserUpdate creates user in ldap if necessary and adds ssh key
+// OnUserUpdate triggers endpoints hooks
 func OnUserUpdate(action terraModel.UserAction) {
-	var user terraUser.User
-	err := json.Unmarshal([]byte(action.Data), &user)
-	if err != nil {
-		log.Error().Msgf("Failed to decode user: %s", action.Data)
-		return
-	}
-	if user.SSHPubKey == "" {
-		log.Debug().Msg("User has no ssh key declared")
-		return
-	}
 	config := LoadConfig()
-	if config.Users.Ldap.Host == "" {
-		log.Warn().Msg("No LDAP settings, skipping")
-		return
-	}
-
-	userHome := fmt.Sprintf(config.Users.Home, user.UID)
-
-	l, err := ldap.Dial("tcp", fmt.Sprintf("%s:%d", config.Users.Ldap.Host, config.Users.Ldap.Port))
-	if err != nil {
-		log.Error().Msgf("ldap conn error: %s", err)
-		return
-	}
-	defer l.Close()
-
-	if config.Users.Ldap.TLS {
-		// Reconnect with TLS
-		err = l.StartTLS(&tls.Config{InsecureSkipVerify: true})
-		if err != nil {
-			log.Error().Msgf("ldap tls error: %s", err)
-			return
-		}
-	}
-
-	// First bind with a read only user
-	err = l.Bind(config.Users.Ldap.AdminCN, config.Users.Ldap.AdminPassword)
-	if err != nil {
-		log.Error().Msgf("ldap bind error: %s", err)
-		return
-	}
-
-	// Search for the given username
-	searchRequest := ldap.NewSearchRequest(
-		fmt.Sprintf("ou=%s,%s", config.Users.Ldap.OU, config.Users.Ldap.DN),
-		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-		fmt.Sprintf("(&(uid=%s))", user.UID),
-		[]string{"dn", "uidNumber"},
-		nil,
-	)
-
-	var UID int64
-	sr, err := l.Search(searchRequest)
-	if err != nil || len(sr.Entries) == 0 {
-		log.Info().Msgf("ldap user not found, creating it: %s", err)
-		req := ldap.NewAddRequest(fmt.Sprintf("uid=%s,ou=%s,%s", user.UID, config.Users.Ldap.OU, config.Users.Ldap.DN), nil)
-		req.Attribute("homeDirectory", []string{userHome})
-		req.Attribute("cn", []string{user.Email})
-		req.Attribute("sn", []string{user.UID})
-		req.Attribute("gidNumber", []string{fmt.Sprintf("%d", config.Users.Ldap.GID)})
-		UID = config.Users.Ldap.MinUID + countBiosphereUsers(user.UID)
-		req.Attribute("uidNumber", []string{fmt.Sprintf("%d", UID)})
-		req.Attribute("loginShell", []string{"/bin/bash"})
-		req.Attribute("objectClass", []string{"PosixAccount", "inetOrgPerson"})
-		err = l.Add(req)
-		if err != nil {
-			log.Error().Msgf("Failed to add user in ldap: %s", err)
-			return
-		}
-	} else {
-		log.Debug().Msgf("Got user in ldap: %+v", sr.Entries[0].Attributes)
-		for _, attr := range sr.Entries[0].Attributes {
-			if attr.Name == "uidNumber" {
-				var UIDErr error
-				UID, UIDErr = strconv.ParseInt(attr.Values[0], 10, 64)
-				if UIDErr != nil {
-					log.Error().Msgf("invalid uidnumber: %+v", attr.Values)
-					return
-				}
-				break
+	uidIndex := countBiosphereUsers(action.UID)
+	log.Info().Msgf("should trigger hook on endpoints for user %d", uidIndex)
+	for _, endpoint := range config.Endpoints {
+		if endpoint.Hook != "" {
+			log.Info().Msgf("should trigger hook %s", endpoint.Hook)
+			client := http.Client{}
+			nsReq, hookErr := http.NewRequest("POST", fmt.Sprintf("%s/biosphere-ldap/user/%s/%d", endpoint.Hook, action.UID, uidIndex), bytes.NewBuffer([]byte(action.Data)))
+			nsReq.Header.Set("X-API-KEY", endpoint.APIKey)
+			nsReq.Header.Add("Content-Type", "application/json")
+			if hookErr != nil {
+				log.Error().Msgf("Failed to request hook %s", endpoint.Hook)
 			}
+			hookResp, hookRespErr := client.Do(nsReq)
+			if hookRespErr != nil {
+				log.Error().Msgf("Failed to request hook %s: %s", endpoint.Hook, hookRespErr)
+			}
+			defer hookResp.Body.Close()
+			if hookResp.StatusCode != 200 {
+				log.Error().Msgf("Hook %s error: %s", endpoint.Hook, hookResp.Body)
+			}
+
 		}
 	}
-
-	userSSHPath := fmt.Sprintf("%s/.ssh", userHome)
-	_, homeErr := os.Stat(userSSHPath)
-	if os.IsNotExist(homeErr) {
-		os.MkdirAll(userHome, 0755)
-		os.Mkdir(userSSHPath, 0700)
-	}
-
-	userAuthorizedKeys := fmt.Sprintf("%s/authorized_keys", userSSHPath)
-	ioutil.WriteFile(userAuthorizedKeys, []byte(user.SSHPubKey), 0644)
-	var chErr error
-	if os.IsNotExist(homeErr) {
-		chErr = os.Chown(userHome, int(UID), config.Users.Ldap.GID)
-		if chErr != nil {
-			log.Error().Msgf("Failed to chown %s", userHome)
-		}
-		chErr = os.Chown(userSSHPath, int(UID), config.Users.Ldap.GID)
-		if chErr != nil {
-			log.Error().Msgf("Failed to chown %s", userSSHPath)
-		}
-	}
-	chErr = os.Chown(userAuthorizedKeys, int(UID), config.Users.Ldap.GID)
-	if chErr != nil {
-		log.Error().Msgf("Failed to chown %s", userAuthorizedKeys)
-	}
-
 }
 
 // GetGotEventAction gets a message from rabbitmq exchange
@@ -452,6 +496,11 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/biosphere", HomeHandler).Methods("GET")
 	r.HandleFunc("/biosphere/user/{id}/endpoint/{endpoint}/ns/{ns}", UserDefaultsHandler).Methods("GET")
+
+	r.HandleFunc("/biosphere/user", UserCreateHandler).Methods("POST")
+	r.HandleFunc("/biosphere/user/{id}", UserUpdateHandler).Methods("PUT")
+	r.HandleFunc("/biosphere/user/{id}/ns/{nsid}", NSCreateHandler).Methods("POST")
+	r.HandleFunc("/biosphere/user/{id}/ns/{nsid}", NSUpdateHandler).Methods("PUT")
 
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},

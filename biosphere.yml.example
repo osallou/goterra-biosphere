@@ -12,16 +12,5 @@ endpoints:
     keypair_default: "DefaultKeypairName (must exists), "
     per_ns_project: true
     user_role: "IDOfUserRole"
-
-users:
-  home: "/home/biosphere/%s"  # home location
-  ldap:
-    host: "localhost"
-    port: 3890
-    admin_cn: "cn=admin,dc=example,dc=org"
-    admin_password: "test"
-    dn: "dc=example,dc=org"
-    ou: "biosphere" # organizational unit for users, must exists
-    gid: 500
-    minuid: 1000
-    tls: false
+    hook: "http://localhost:8008" # optional hook to trigger biosphere-ldap
+    apikey: "123" # hook apikey

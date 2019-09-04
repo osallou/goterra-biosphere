@@ -42,43 +42,13 @@ type Endpoint struct {
 	KeypairDefault     string `yaml:"keypair_default"`
 	UserRole           string `yaml:"user_role"`
 	AdminRole          string `yaml:"admin_role"`
-}
-
-/*
-users:
-  home: "/home/biosphere/%s"  # home location
-  ldap:
-    host: "localhost"
-    port: 389
-    admin_cn: ""
-    admin_password: ""
-    dn: "goterra.org"
-    ou: "biosphere" # organizational unit for users
-*/
-
-// LdapConfig defines ldap connection parameters
-type LdapConfig struct {
-	Host          string
-	Port          uint64
-	AdminCN       string `yaml:"admin_cn"`
-	AdminPassword string `yaml:"admin_password"`
-	DN            string `yaml:"dn"`
-	OU            string `yaml:"ou"`
-	GID           int    `yaml:"gid"`
-	MinUID        int64  `yaml:"minuid"`
-	TLS           bool   `yaml:"tls"`
-}
-
-// UserConfig defines user creation
-type UserConfig struct {
-	Home string
-	Ldap LdapConfig
+	Hook               string `yaml:"hook"`
+	APIKey             string `yaml:"apikey"`
 }
 
 // BiosphereConfig is the yaml config for biosphere
 type BiosphereConfig struct {
 	Endpoints []Endpoint
-	Users     UserConfig
 	Loaded    bool
 }
 
