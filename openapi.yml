@@ -1,0 +1,174 @@
+# swagger: "2.0"
+openapi: "3.0.0"
+info:
+  title: GoTerra-Biosphere
+  description: GoTerra Biosphere service API
+  version: 0.0.1
+  
+servers:
+  - url: https://goterra.genouest.org
+    
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    JWTToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    User:
+      type: object
+      properties:
+        uid:
+          type: string
+        password:
+          type: string
+        email:
+          type: string
+        admin:
+          type: boolean
+        pub_key:
+          description: ssh public key
+          type: string
+
+paths:
+  /biosphere/user/{id}/endpoint/{endpoint}/ns/{ns}:
+    get:
+      security:
+        - JWTToken: []
+      summary: get user defaults on namespace/endpoints [admin|user]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: id of the user
+        - in: path
+          name: endpoint
+          required: true
+          schema:
+            type: string
+          description: id of the endpoint
+          - in: path
+          name: ns
+          required: true
+          schema:
+            type: string
+          description: id of the namespace
+      responses:
+        '200':
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+        '403':
+          description: invalid token
+  /bioshere/user:
+    post:
+      security:
+        - JWTToken: []
+      summary: create user on biosphere endpoints [admin]
+      description: create a user on all biosphere endpoints and set secrets in goterra
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '200':
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+        '403':
+          description: invalid token
+
+  /bioshere/user/{id}:
+    put:
+      security:
+        - JWTToken: []
+      summary: update user ssh key [admin]
+      description: trigger endpoints hook (if any) with user info (ssh pub key, ...)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: id of the user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '200':
+          description: updated
+          content:
+            application/json:
+              schema:
+                type: object
+        '403':
+          description: invalid token
+  /bioshere/user/{id}/ns/{nsid}:
+    post:
+      security:
+        - JWTToken: []
+      summary: create project for user on biosphere endpoints [admin]
+      description: create a project or add namespace members to default project on endpoints
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: id of the user
+        - in: path
+          name: nsid
+          required: true
+          schema:
+            type: string
+          description: id of the namespace
+      responses:
+        '200':
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+        '403':
+          description: invalid token
+
+    put:
+      security:
+        - JWTToken: []
+      summary: update user ssh key [admin]
+      description: update endpoints project members
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: id of the user
+        - in: path
+          name: nsid
+          required: true
+          schema:
+            type: string
+          description: id of the namespace
+      responses:
+        '200':
+          description: updated
+          content:
+            application/json:
+              schema:
+                type: object
+        '403':
+          description: invalid token
