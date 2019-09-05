@@ -53,7 +53,7 @@ paths:
           schema:
             type: string
           description: id of the endpoint
-          - in: path
+        - in: path
           name: ns
           required: true
           schema:
