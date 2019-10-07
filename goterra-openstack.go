@@ -191,18 +191,23 @@ type biosphereProjectDef struct {
 	ID   string
 }
 
+// OnUserCreateEndpoint creates a user on endpoint
+func OnUserCreateEndpoint(action terraModel.UserAction, endpoint Endpoint) {
+	if action.Data != "aai" {
+		return
+	}
+	createUserOnEndpoint(action.UID, endpoint)
+}
+
 // OnUserCreate creates a user on all endpoints
 func OnUserCreate(action terraModel.UserAction) {
 	cfg := LoadConfig()
 	if action.Data != "aai" {
 		return
 	}
-	token, tokenErr := GetToken(cfg.Endpoints[0], cfg.Endpoints[0].DefaultProjectID)
-	if tokenErr != nil {
-		log.Error().Msgf("Auth failed: %s", tokenErr)
-		return
+	for _, endpoint := range cfg.Endpoints {
+		createUserOnEndpoint(action.UID, endpoint)
 	}
-	createUserOnEndpoints(token, action.UID, cfg.Endpoints)
 }
 
 func getNSMembers(nsID string) []string {
@@ -229,25 +234,37 @@ func getNSMembers(nsID string) []string {
 // OnNSCreate creates a project and adds user to project on openstack and update all endpoint defaults
 func OnNSCreate(action terraModel.UserAction) {
 	cfg := LoadConfig()
+	for _, endpoint := range cfg.Endpoints {
+		OnNSCreateEndpoint(action, endpoint)
+	}
+}
 
-	token, tokenErr := GetToken(cfg.Endpoints[0], cfg.Endpoints[0].DefaultProjectID)
+// OnNSCreateEndpoint creates a project and adds user to project on openstack and update endpoint defaults
+func OnNSCreateEndpoint(action terraModel.UserAction, endpoint Endpoint) {
+	token, tokenErr := GetToken(endpoint, endpoint.DefaultProjectID)
 	if tokenErr != nil {
 		log.Error().Msgf("Auth failed: %s", tokenErr)
 		return
 	}
-	createProjectOnEndpoints(token, action.Data, action.UID, cfg.Endpoints)
+	createProjectOnEndpoint(token, action.Data, action.UID, endpoint)
 	members := getNSMembers(action.Data)
 	for _, member := range members {
-		addUserToProjectOnEndpoints(token, action.Data, member, cfg.Endpoints)
-		createUserEndpointDefaultsOnEndpoints(member, action.Data, cfg.Endpoints)
+		addUserToProjectOnEndpoint(token, action.Data, member, endpoint)
+		createUserEndpointDefaultsOnEndpoint(member, action.Data, endpoint)
 	}
 }
 
 // OnNSUpdate adds user to a project on openstack and update all endpoint defaults
 func OnNSUpdate(action terraModel.UserAction) {
 	cfg := LoadConfig()
+	for _, endpoint := range cfg.Endpoints {
+		OnNSUpdateEndpoint(action, endpoint)
+	}
+}
 
-	token, tokenErr := GetToken(cfg.Endpoints[0], cfg.Endpoints[0].DefaultProjectID)
+// OnNSUpdateEndpoint adds user to a project on openstack and update endpoint defaults
+func OnNSUpdateEndpoint(action terraModel.UserAction, endpoint Endpoint) {
+	token, tokenErr := GetToken(endpoint, endpoint.DefaultProjectID)
 	if tokenErr != nil {
 		log.Error().Msgf("Auth failed: %s", tokenErr)
 		return
@@ -255,59 +272,68 @@ func OnNSUpdate(action terraModel.UserAction) {
 
 	members := getNSMembers(action.Data)
 	for _, member := range members {
-		addUserToProjectOnEndpoints(token, action.Data, member, cfg.Endpoints)
-		createUserEndpointDefaultsOnEndpoints(member, action.Data, cfg.Endpoints)
+		addUserToProjectOnEndpoint(token, action.Data, member, endpoint)
+		createUserEndpointDefaultsOnEndpoint(member, action.Data, endpoint)
+	}
+}
+
+func createUserEndpointDefaultsOnEndpoint(uid string, ns string, endpoint Endpoint) bool {
+	if _, ok := Users[uid]; !ok {
+		return false
+	}
+	if _, ok := Namespaces[ns]; !ok {
+		return false
+	}
+	userID, uok := Users[uid][endpoint.ID]
+
+	if !uok {
+		return false
 	}
 
+	projectName := endpoint.DefaultProjectName
+	projectID := endpoint.DefaultProjectID
+
+	if endpoint.PerNSProject {
+		var pok bool
+		projectID, pok = Namespaces[ns][endpoint.ID]
+		if !pok {
+			return false
+		}
+		projectName = ns
+	}
+	createUserEndpointDefaults(uid, endpoint, userID, projectID, projectName, ns)
+	return true
 }
 
 func createUserEndpointDefaultsOnEndpoints(uid string, ns string, endpoints []Endpoint) {
 	for _, endpoint := range endpoints {
-		if _, ok := Users[uid]; !ok {
-			continue
-		}
-		if _, ok := Namespaces[ns]; !ok {
-			continue
-		}
-		userID, uok := Users[uid][endpoint.ID]
-
-		if !uok {
-			continue
-		}
-
-		projectName := endpoint.DefaultProjectName
-		projectID := endpoint.DefaultProjectID
-
-		if endpoint.PerNSProject {
-			var pok bool
-			projectID, pok = Namespaces[ns][endpoint.ID]
-			if !pok {
-				continue
-			}
-			projectName = ns
-		}
-		createUserEndpointDefaults(uid, endpoint, userID, projectID, projectName, ns)
+		createUserEndpointDefaultsOnEndpoint(uid, ns, endpoint)
 	}
+}
+
+func addUserToProjectOnEndpoint(token string, ns string, uid string, endpoint Endpoint) bool {
+	if _, ok := Users[uid]; !ok {
+		return false
+	}
+	if _, ok := Namespaces[ns]; !ok {
+		return false
+	}
+	userID, uok := Users[uid][endpoint.ID]
+	projectID, pok := Namespaces[ns][endpoint.ID]
+	if !uok || !pok {
+		return false
+	}
+	err := addUserToProject(token, endpoint, projectID, userID, endpoint.UserRole)
+	if err != nil {
+		log.Error().Str("endpoint", endpoint.ID).Str("ns", ns).Str("user", uid).Msg("Failed to add user to project on endpoint")
+		return false
+	}
+	return true
 }
 
 func addUserToProjectOnEndpoints(token string, ns string, uid string, endpoints []Endpoint) {
 	for _, endpoint := range endpoints {
-		if _, ok := Users[uid]; !ok {
-			continue
-		}
-		if _, ok := Namespaces[ns]; !ok {
-			continue
-		}
-		userID, uok := Users[uid][endpoint.ID]
-		projectID, pok := Namespaces[ns][endpoint.ID]
-		if !uok || !pok {
-			continue
-		}
-		err := addUserToProject(token, endpoint, projectID, userID, endpoint.UserRole)
-		if err != nil {
-			log.Error().Str("endpoint", endpoint.ID).Str("ns", ns).Str("user", uid).Msg("Failed to add user to project on endpoint")
-		}
-
+		addUserToProjectOnEndpoint(token, ns, uid, endpoint)
 	}
 }
 
@@ -353,10 +379,14 @@ func removeUserFromProject(token string, endpoint Endpoint, projectID string, us
 
 func createProjectOnEndpoints(token string, ns string, uid string, endpoints []Endpoint) {
 	for _, endpoint := range endpoints {
-		_, _, err := createProject(token, endpoint, uid, ns)
-		if err != nil {
-			log.Error().Str("endpoint", endpoint.ID).Str("ns", ns).Msg("Failed to create project on endpoint")
-		}
+		createProjectOnEndpoint(token, ns, uid, endpoint)
+	}
+}
+
+func createProjectOnEndpoint(token string, ns string, uid string, endpoint Endpoint) {
+	_, _, err := createProject(token, endpoint, uid, ns)
+	if err != nil {
+		log.Error().Str("endpoint", endpoint.ID).Str("ns", ns).Msg("Failed to create project on endpoint")
 	}
 }
 
@@ -493,12 +523,20 @@ func createKeyPair(token string, endpoint Endpoint, projectID string, userID str
 	return nil
 }
 
-func createUserOnEndpoints(token string, uid string, endpoints []Endpoint) {
+func createUserOnEndpoints(uid string, endpoints []Endpoint) {
 	for _, endpoint := range endpoints {
-		_, err := createUser(token, endpoint, uid)
-		if err != nil {
-			log.Error().Str("endpoint", endpoint.ID).Str("user", uid).Msg("Failed to create user on endpoint")
-		}
+		createUserOnEndpoint(uid, endpoint)
+	}
+}
+
+func createUserOnEndpoint(uid string, endpoint Endpoint) {
+	token, tokenErr := GetToken(endpoint, endpoint.DefaultProjectID)
+	if tokenErr != nil {
+		log.Error().Str("endpoint", endpoint.ID).Str("user", uid).Msg("Failed to auth")
+	}
+	_, err := createUser(token, endpoint, uid)
+	if err != nil {
+		log.Error().Str("endpoint", endpoint.ID).Str("user", uid).Msg("Failed to create user on endpoint")
 	}
 }
 

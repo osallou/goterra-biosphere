@@ -42,6 +42,7 @@ const DESTROY string = "destroy"
 var mongoClient *mongo.Client
 var nsCollection *mongo.Collection
 var endpointDefaultsCollection *mongo.Collection
+var endpointCollection *mongo.Collection
 var biosphereUserCollection *mongo.Collection
 var biosphereNSCollection *mongo.Collection
 
@@ -62,6 +63,23 @@ type BiosphereNS struct {
 	ID       string `json:"id"`
 	OID      string `json:"oid"` // openstack project id
 	Endpoint string `json:"endpoint"`
+}
+
+func getEndpoint(id string) (*Endpoint, error) {
+	if id == "" {
+		return nil, fmt.Errorf("invalid id")
+	}
+	endpoint := Endpoint{}
+	filter := bson.M{
+		"id": id,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err := endpointCollection.FindOne(ctx, filter).Decode(&endpoint)
+	if err != nil {
+		return nil, err
+	}
+	return &endpoint, nil
 }
 
 // UserCreateHandler triggers onUserCreate
@@ -90,7 +108,22 @@ var UserCreateHandler = func(w http.ResponseWriter, r *http.Request) {
 		UID:    userID,
 		Data:   string(b),
 	}
-	OnUserCreate(action)
+
+	keys, ok := r.URL.Query()["endpoint"]
+	if ok || len(keys[0]) < 1 {
+		endpointID := keys[0]
+		endpoint, endpointErr := getEndpoint(endpointID)
+		if endpointErr != nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Header().Add("Content-Type", "application/json")
+			respError := map[string]interface{}{"message": "invalid endpoint"}
+			json.NewEncoder(w).Encode(respError)
+			return
+		}
+		OnUserCreateEndpoint(action, *endpoint)
+	} else {
+		OnUserCreate(action)
+	}
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
 	resp := map[string]interface{}{"message": "done"}
@@ -155,7 +188,23 @@ var NSCreateHandler = func(w http.ResponseWriter, r *http.Request) {
 		UID:    userID,
 		Data:   nsID,
 	}
-	OnNSCreate(action)
+
+	keys, ok := r.URL.Query()["endpoint"]
+	if ok || len(keys[0]) < 1 {
+		endpointID := keys[0]
+		endpoint, endpointErr := getEndpoint(endpointID)
+		if endpointErr != nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Header().Add("Content-Type", "application/json")
+			respError := map[string]interface{}{"message": "invalid endpoint"}
+			json.NewEncoder(w).Encode(respError)
+			return
+		}
+		OnNSCreateEndpoint(action, *endpoint)
+	} else {
+		OnNSCreate(action)
+	}
+
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
 	resp := map[string]interface{}{"message": "done"}
@@ -188,7 +237,23 @@ var NSUpdateHandler = func(w http.ResponseWriter, r *http.Request) {
 		UID:    userID,
 		Data:   nsID,
 	}
-	OnNSUpdate(action)
+
+	keys, ok := r.URL.Query()["endpoint"]
+	if ok || len(keys[0]) < 1 {
+		endpointID := keys[0]
+		endpoint, endpointErr := getEndpoint(endpointID)
+		if endpointErr != nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Header().Add("Content-Type", "application/json")
+			respError := map[string]interface{}{"message": "invalid endpoint"}
+			json.NewEncoder(w).Encode(respError)
+			return
+		}
+		OnNSUpdateEndpoint(action, *endpoint)
+	} else {
+		OnNSUpdate(action)
+	}
+
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
 	resp := map[string]interface{}{"message": "done"}
@@ -460,6 +525,9 @@ func main() {
 		log.Error().Msgf("Failed to connect to mongo server %s", config.Mongo.URL)
 		os.Exit(1)
 	}
+
+	endpointCollection = mongoClient.Database(config.Mongo.DB).Collection("endpoint")
+
 	endpointDefaultsCollection = mongoClient.Database(config.Mongo.DB).Collection("user_ep_defaults")
 
 	Users = make(map[string]map[string]string)
