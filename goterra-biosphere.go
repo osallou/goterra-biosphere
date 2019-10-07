@@ -370,6 +370,7 @@ func OnUserUpdateEndpoint(action terraModel.UserAction, endpoint Endpoint) {
 		hookResp, hookRespErr := client.Do(nsReq)
 		if hookRespErr != nil {
 			log.Error().Msgf("Failed to request hook %s: %s", endpoint.Hook, hookRespErr)
+			return
 		}
 		defer hookResp.Body.Close()
 		if hookResp.StatusCode != 200 {

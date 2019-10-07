@@ -11,4 +11,3 @@ To submit jobs for biosphere:
 
 With biosphere API, creating a user on an endpoint will store his credentials in secrets automatically.
 Creating project will also store project default (project id etc..) and create an internal keypair named biosphere (not user ssh pub key).
-
