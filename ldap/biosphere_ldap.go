@@ -57,8 +57,8 @@ func LoadConfig() BiosphereConfig {
 		return biosphereConfig
 	}
 	cfgFile := "biosphere.yml"
-	if os.Getenv("GOT_BIOSPHERE_CONFIG") != "" {
-		cfgFile = os.Getenv("GOT_BIOSPHERE_CONFIG")
+	if os.Getenv("GOT_BIOSPHERE_LDAP_CONFIG") != "" {
+		cfgFile = os.Getenv("GOT_BIOSPHERE_LDAP_CONFIG")
 	}
 
 	cfg, _ := ioutil.ReadFile(cfgFile)
