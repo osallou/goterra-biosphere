@@ -161,10 +161,10 @@ func OnUserUpdate(action terraModel.UserAction, uidNumber int64) {
 		nil,
 	)
 
-	UID := uidNumber
+	UID := uidNumber + biosphereConfig.Users.Ldap.MinUID
 	sr, err := l.Search(searchRequest)
 	if err != nil || len(sr.Entries) == 0 {
-		log.Info().Msgf("ldap user not found, creating it: %s", err)
+		log.Info().Msgf("ldap user not found, creating it: %s", user.UID)
 		req := ldap.NewAddRequest(fmt.Sprintf("uid=%s,ou=%s,%s", user.UID, config.Users.Ldap.OU, config.Users.Ldap.DN), nil)
 		req.Attribute("homeDirectory", []string{userHome})
 		req.Attribute("cn", []string{user.Email})
