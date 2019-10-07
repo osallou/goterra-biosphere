@@ -63,6 +63,49 @@ func LoadConfig() BiosphereConfig {
 
 	cfg, _ := ioutil.ReadFile(cfgFile)
 	yaml.Unmarshal([]byte(cfg), &biosphereConfig)
+	if os.Getenv("GOT_BIOSPHERE_LDAP_HOST") != "" {
+		biosphereConfig.Users.Ldap.Host = os.Getenv("GOT_BIOSPHERE_LDAP_HOST")
+	}
+	if os.Getenv("GOT_BIOSPHERE_LDAP_PORT") != "" {
+		port, err := strconv.ParseInt(os.Getenv("GOT_BIOSPHERE_LDAP_PORT"), 10, 64)
+		if err == nil {
+			biosphereConfig.Users.Ldap.Port = uint64(port)
+		}
+	}
+	if os.Getenv("GOT_BIOSPHERE_LDAP_ADMIN_CN") != "" {
+		biosphereConfig.Users.Ldap.AdminCN = os.Getenv("GOT_BIOSPHERE_LDAP_ADMIN_CN")
+	}
+	if os.Getenv("GOT_BIOSPHERE_LDAP_ADMIN_PASSWORD") != "" {
+		biosphereConfig.Users.Ldap.AdminPassword = os.Getenv("GOT_BIOSPHERE_LDAP_ADMIN_PASSWORD")
+	}
+	if os.Getenv("GOT_BIOSPHERE_LDAP_DN") != "" {
+		biosphereConfig.Users.Ldap.DN = os.Getenv("GOT_BIOSPHERE_LDAP_DN")
+	}
+	if os.Getenv("GOT_BIOSPHERE_LDAP_OU") != "" {
+		biosphereConfig.Users.Ldap.OU = os.Getenv("GOT_BIOSPHERE_LDAP_OU")
+	}
+	if os.Getenv("GOT_BIOSPHERE_LDAP_GID") != "" {
+		val, err := strconv.ParseInt(os.Getenv("GOT_BIOSPHERE_LDAP_GID"), 10, 64)
+		if err == nil {
+			biosphereConfig.Users.Ldap.GID = int(val)
+		}
+	}
+	if os.Getenv("GOT_BIOSPHERE_LDAP_MIDUID") != "" {
+		val, err := strconv.ParseInt(os.Getenv("GOT_BIOSPHERE_LDAP_MINUID"), 10, 64)
+		if err == nil {
+			biosphereConfig.Users.Ldap.MinUID = val
+		}
+	}
+	if os.Getenv("GOT_BIOSPHERE_LDAP_TLS") == "1" {
+		biosphereConfig.Users.Ldap.TLS = true
+	}
+	if os.Getenv("GOT_BIOSPHERE_HOME") != "" {
+		biosphereConfig.Users.Home = os.Getenv("GOT_BIOSPHERE_HOME")
+	}
+	if os.Getenv("GOT_BIOSPHERE_APIKEY") != "" {
+		biosphereConfig.Users.APIKey = os.Getenv("GOT_BIOSPHERE_APIKEY")
+	}
+
 	return biosphereConfig
 }
 

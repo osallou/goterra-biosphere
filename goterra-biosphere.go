@@ -156,7 +156,23 @@ var UserUpdateHandler = func(w http.ResponseWriter, r *http.Request) {
 		UID:    userID,
 		Data:   string(b),
 	}
-	OnUserUpdate(action)
+
+	keys, ok := r.URL.Query()["endpoint"]
+	if ok || len(keys[0]) < 1 {
+		endpointID := keys[0]
+		endpoint, endpointErr := getEndpoint(endpointID)
+		if endpointErr != nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Header().Add("Content-Type", "application/json")
+			respError := map[string]interface{}{"message": "invalid endpoint"}
+			json.NewEncoder(w).Encode(respError)
+			return
+		}
+		OnUserUpdateEndpoint(action, *endpoint)
+	} else {
+		OnUserUpdate(action)
+	}
+
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
 	resp := map[string]interface{}{"message": "done"}
@@ -338,31 +354,37 @@ func countBiosphereUsers(uid string) int64 {
 	return counter
 }
 
+// OnUserUpdateEndpoint triggers endpoint hooks
+func OnUserUpdateEndpoint(action terraModel.UserAction, endpoint Endpoint) {
+	uidIndex := countBiosphereUsers(action.UID)
+	log.Info().Msgf("should trigger hook on endpoints for user %d", uidIndex)
+	if endpoint.Hook != "" {
+		log.Info().Msgf("should trigger hook %s", endpoint.Hook)
+		client := http.Client{}
+		nsReq, hookErr := http.NewRequest("POST", fmt.Sprintf("%s/biosphere-ldap/user/%s/%d", endpoint.Hook, action.UID, uidIndex), bytes.NewBuffer([]byte(action.Data)))
+		nsReq.Header.Set("X-API-KEY", endpoint.APIKey)
+		nsReq.Header.Add("Content-Type", "application/json")
+		if hookErr != nil {
+			log.Error().Msgf("Failed to request hook %s", endpoint.Hook)
+		}
+		hookResp, hookRespErr := client.Do(nsReq)
+		if hookRespErr != nil {
+			log.Error().Msgf("Failed to request hook %s: %s", endpoint.Hook, hookRespErr)
+		}
+		defer hookResp.Body.Close()
+		if hookResp.StatusCode != 200 {
+			log.Error().Msgf("Hook %s error: %s", endpoint.Hook, hookResp.Body)
+		}
+
+	}
+}
+
 // OnUserUpdate triggers endpoints hooks
 func OnUserUpdate(action terraModel.UserAction) {
 	config := LoadConfig()
-	uidIndex := countBiosphereUsers(action.UID)
-	log.Info().Msgf("should trigger hook on endpoints for user %d", uidIndex)
-	for _, endpoint := range config.Endpoints {
-		if endpoint.Hook != "" {
-			log.Info().Msgf("should trigger hook %s", endpoint.Hook)
-			client := http.Client{}
-			nsReq, hookErr := http.NewRequest("POST", fmt.Sprintf("%s/biosphere-ldap/user/%s/%d", endpoint.Hook, action.UID, uidIndex), bytes.NewBuffer([]byte(action.Data)))
-			nsReq.Header.Set("X-API-KEY", endpoint.APIKey)
-			nsReq.Header.Add("Content-Type", "application/json")
-			if hookErr != nil {
-				log.Error().Msgf("Failed to request hook %s", endpoint.Hook)
-			}
-			hookResp, hookRespErr := client.Do(nsReq)
-			if hookRespErr != nil {
-				log.Error().Msgf("Failed to request hook %s: %s", endpoint.Hook, hookRespErr)
-			}
-			defer hookResp.Body.Close()
-			if hookResp.StatusCode != 200 {
-				log.Error().Msgf("Hook %s error: %s", endpoint.Hook, hookResp.Body)
-			}
 
-		}
+	for _, endpoint := range config.Endpoints {
+		OnUserUpdateEndpoint(action, endpoint)
 	}
 }
 
