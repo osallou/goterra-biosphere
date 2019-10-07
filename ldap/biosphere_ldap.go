@@ -164,7 +164,8 @@ func OnUserUpdate(action terraModel.UserAction, uidNumber int64) {
 	UID := uidNumber + biosphereConfig.Users.Ldap.MinUID
 	sr, err := l.Search(searchRequest)
 	if err != nil || len(sr.Entries) == 0 {
-		log.Info().Msgf("ldap user not found, creating it: %s", user.UID)
+		log.Info().Msgf("ldap user not found, creating it: %s => %d", user.UID, UID)
+		log.Debug().Msgf("New entry %s", fmt.Sprintf("uid=%s,ou=%s,%s", user.UID, config.Users.Ldap.OU, config.Users.Ldap.DN))
 		req := ldap.NewAddRequest(fmt.Sprintf("uid=%s,ou=%s,%s", user.UID, config.Users.Ldap.OU, config.Users.Ldap.DN), nil)
 		req.Attribute("homeDirectory", []string{userHome})
 		req.Attribute("cn", []string{user.Email})
@@ -179,8 +180,9 @@ func OnUserUpdate(action terraModel.UserAction, uidNumber int64) {
 			return
 		}
 	} else {
-		log.Debug().Msgf("Got user in ldap: %+v", sr.Entries[0].Attributes)
+		log.Debug().Msgf("Got user in ldap: %s => %d", user.UID, UID)
 		for _, attr := range sr.Entries[0].Attributes {
+			log.Debug().Msgf("%s => %s", attr.Name, attr.Values[0])
 			if attr.Name == "uidNumber" {
 				var UIDErr error
 				UID, UIDErr = strconv.ParseInt(attr.Values[0], 10, 64)
